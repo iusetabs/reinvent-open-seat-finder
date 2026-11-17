@@ -90,9 +90,13 @@ python3 server.py
 The app opens at **http://localhost:8484**. Click **Sign in with AWS Builder ID**, finish sign-in, and
 the catalog loads.
 
+The server generates a random secret on each run and opens your browser at `/?k=<secret>`, which sets an
+HttpOnly session cookie. `/api`, `/auth` and `/local` calls without that cookie get a 401, so other local
+processes or users can't use your signed-in session.
+
 Options:
 
-- `python3 server.py --no-browser` doesn't open a browser tab.
+- `python3 server.py --no-browser` doesn't open a browser tab; it prints the secret URL to open yourself.
 - `OPEN_SEATS_PORT=8485 python3 server.py` uses another port. It must be one of the Events API's reserved
   loopback ports, 8484 to 8489.
 
