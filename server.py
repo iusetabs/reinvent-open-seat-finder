@@ -63,6 +63,7 @@ class TokenStore:
         with self._lock:
             self.access_token = self.refresh_token = None
             self.expires_at = 0.0
+            self.pending = {}
 
     @property
     def signed_in(self):
@@ -237,12 +238,13 @@ class Handler(BaseHTTPRequestHandler):
         self._redirect("/")
 
     def _logout(self):
-        if tokens.refresh_token:
-            try:
+        try:
+            if tokens.refresh_token:
                 post_form(REVOKE_URL, {"client_id": CLIENT_ID, "token": tokens.refresh_token})
-            except urllib.error.URLError:
-                pass
-        tokens.clear()
+        except Exception:
+            pass  # revocation is best-effort; local state is always cleared
+        finally:
+            tokens.clear()
         self._json(200, {"signedIn": False})
 
     def _proxy(self, method, url):
