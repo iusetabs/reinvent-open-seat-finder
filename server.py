@@ -26,6 +26,8 @@ import webbrowser
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import auto_reserve
+
 mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 PORT = int(os.environ.get("OPEN_SEATS_PORT", "8484"))
@@ -152,6 +154,17 @@ def call_api(method, path, body):
     if status == 401:
         tokens.clear()
     return status, payload, headers
+
+
+def sign_out():
+    """Revoke the refresh token (best effort) and clear all local token state."""
+    try:
+        if tokens.refresh_token:
+            post_form(REVOKE_URL, {"client_id": CLIENT_ID, "token": tokens.refresh_token})
+    except Exception:
+        pass
+    finally:
+        tokens.clear()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -295,13 +308,7 @@ class Handler(BaseHTTPRequestHandler):
         self._redirect("/")
 
     def _logout(self):
-        try:
-            if tokens.refresh_token:
-                post_form(REVOKE_URL, {"client_id": CLIENT_ID, "token": tokens.refresh_token})
-        except Exception:
-            pass  # revocation is best-effort; local state is always cleared
-        finally:
-            tokens.clear()
+        sign_out()
         self._json(200, {"signedIn": False})
 
     def _proxy(self, method, url):
@@ -342,10 +349,20 @@ def main():
         threading.Timer(0.5, lambda: webbrowser.open(start_url)).start()
     else:
         print("Open this URL in your browser to start a session: %s" % start_url)
+    watcher = None
+    if "--auto-reserve" in sys.argv or os.environ.get("OPEN_SEATS_AUTO_RESERVE") == "1":
+        print("WARNING: auto-reserve is ON. After you sign in, about every 15 minutes (random 10-20) this tries to\n"
+              "reserve your favorited sessions. Failures are printed as ERROR lines. Ctrl+C stops it and signs out.")
+        watcher = auto_reserve.AutoReserver(call_api, lambda: tokens.signed_in, tokens.clear)
+        watcher.start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nStopped.")
+    finally:
+        if watcher:
+            watcher.stop()
+            sign_out()
 
 
 if __name__ == "__main__":
