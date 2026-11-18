@@ -13,6 +13,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import secrets
 import sys
 import threading
@@ -99,6 +100,21 @@ def refresh():
         return False
 
 
+PROXY_ALLOWED = re.compile(
+    r"^/events/[\w-]+/(?:sessions|schedule|reservations|favorites|personal-time)(?:/[\w%-]+)?$"
+)
+
+
+def proxy_path_allowed(path):
+    """Allow-list of Events API endpoints; rejects traversal and odd encodings."""
+    if not PROXY_ALLOWED.match(path):
+        return False
+    decoded = urllib.parse.unquote(path)
+    # Reject anything that decodes to separators, dots or control chars.
+    return not any(c in "\\.%\x7f" or c < " " for c in decoded) and "//" not in decoded \
+        and decoded.count("/") == path.count("/")
+
+
 def call_api(method, path, body):
     """Forward to the Events API. Refresh once on 401, then give up (per the docs)."""
     if tokens.access_token and time.time() >= tokens.expires_at:
@@ -176,6 +192,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/auth/status":
             return self._json(200, {"signedIn": tokens.signed_in})
         if url.path.startswith("/api/"):
+            if not self._host_ok():
+                return self._send(421, b"Misdirected request", "text/plain")
+            if self.headers.get(CSRF_HEADER) != "1":
+                return self._json(403, {"message": "Missing %s header." % CSRF_HEADER})
             return self._proxy("GET", url)
         return self._static(url.path)
 
@@ -249,7 +269,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _proxy(self, method, url):
         path = url.path[len("/api"):]
-        if not path.startswith("/events"):
+        if not proxy_path_allowed(path):
             return self._json(404, {"message": "Not found"})
         if url.query:
             path += "?" + url.query
