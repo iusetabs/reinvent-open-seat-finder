@@ -14,6 +14,7 @@ import hmac
 import json
 import mimetypes
 import os
+import re
 import secrets
 import sys
 import threading
@@ -68,6 +69,7 @@ class TokenStore:
         with self._lock:
             self.access_token = self.refresh_token = None
             self.expires_at = 0.0
+            self.pending = {}
 
     @property
     def signed_in(self):
@@ -101,6 +103,21 @@ def refresh():
     except (urllib.error.URLError, ValueError, KeyError):
         tokens.clear()
         return False
+
+
+PROXY_ALLOWED = re.compile(
+    r"^/events/[\w-]+/(?:sessions|schedule|reservations|favorites|personal-time)(?:/[\w%-]+)?$"
+)
+
+
+def proxy_path_allowed(path):
+    """Allow-list of Events API endpoints; rejects traversal and odd encodings."""
+    if not PROXY_ALLOWED.match(path):
+        return False
+    decoded = urllib.parse.unquote(path)
+    # Reject anything that decodes to separators, dots or control chars.
+    return not any(c in "\\.%\x7f" or c < " " for c in decoded) and "//" not in decoded \
+        and decoded.count("/") == path.count("/")
 
 
 def call_api(method, path, body):
@@ -195,6 +212,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/auth/status":
             return self._json(200, {"signedIn": tokens.signed_in})
         if url.path.startswith("/api/"):
+            if not self._host_ok():
+                return self._send(421, b"Misdirected request", "text/plain")
+            if self.headers.get(CSRF_HEADER) != "1":
+                return self._json(403, {"message": "Missing %s header." % CSRF_HEADER})
             return self._proxy("GET", url)
         return self._static(url.path)
 
@@ -259,17 +280,18 @@ class Handler(BaseHTTPRequestHandler):
         self._redirect("/")
 
     def _logout(self):
-        if tokens.refresh_token:
-            try:
+        try:
+            if tokens.refresh_token:
                 post_form(REVOKE_URL, {"client_id": CLIENT_ID, "token": tokens.refresh_token})
-            except urllib.error.URLError:
-                pass
-        tokens.clear()
+        except Exception:
+            pass  # revocation is best-effort; local state is always cleared
+        finally:
+            tokens.clear()
         self._json(200, {"signedIn": False})
 
     def _proxy(self, method, url):
         path = url.path[len("/api"):]
-        if not path.startswith("/events"):
+        if not proxy_path_allowed(path):
             return self._json(404, {"message": "Not found"})
         if url.query:
             path += "?" + url.query
