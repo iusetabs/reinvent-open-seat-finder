@@ -111,6 +111,15 @@ option), so Open Seats can't be a public website. Everything you reserve or bloc
 schedule and shows up in the official re:Invent app. The project page at
 [openseats.avinashdalvi.com](https://openseats.avinashdalvi.com) (source in `site/`) explains how to run it.
 
+## Tests
+
+```
+python3 -m unittest
+```
+
+Runs `test_local_auth.py` (local-server cookie auth) and `test_proxy_path.py` (proxy path allow-list). Both
+are offline and never contact AWS.
+
 ## Security notes
 
 - Tokens are held only in the server process's memory. Stopping the server forgets them. **Sign out**
