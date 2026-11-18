@@ -99,6 +99,24 @@ Options:
 - `python3 server.py --no-browser` doesn't open a browser tab; it prints the secret URL to open yourself.
 - `OPEN_SEATS_PORT=8485 python3 server.py` uses another port. It must be one of the Events API's reserved
   loopback ports, 8484 to 8489.
+- `python3 server.py --auto-reserve` (or `OPEN_SEATS_AUTO_RESERVE=1`) turns on the **opt-in auto-reserve watcher**.
+  After you sign in in the browser, about every 15 minutes at a random interval (10 to 20 minutes,
+  `AUTO_MIN_MINUTES`/`AUTO_MAX_MINUTES` in `auto_reserve.py`) it reads your favorites, skips ones already reserved or
+  clashing with your reservations/personal time, and tries to reserve the rest (batches of 10, at most one
+  attempt per session per cycle, `Retry-After` honoured). Refusals (full, clash, ...) and sign-in problems
+  print `ERROR` lines in the server console; failed sessions are retried next cycle, reserved ones never again.
+  Walk-in / walk-up / non-reservable favorites are skipped (one info line, once), and a session the API says
+  your registration doesn't include is dropped for the run (ERROR, once); "full" ones are just an info line and retried.
+  Output is coloured on a terminal (info white, WARN yellow for "sign in again"/rate-limit waits, ERROR red, booked green); set `NO_COLOR=1` for plain text.
+  It also watches for **repeats** of your favorites (same session code with an `-R1`/`-R2` suffix, e.g.
+  `ARC320-R2`; sessions without a code are matched by identical title): it prints an info line when a new
+  repeat appears or one has open seats (once each), plus a per-cycle summary, and tries the open, non-clashing
+  ones too. Once any session of a talk is reserved the others are no longer tried, and only one session per
+  talk is attempted per cycle. Your favorites list is never modified.
+  Sessions are shown as `CODE (Title)`; booked ones also show their start time.
+  It never signs in for you (sign in again if it says your session expired), and Ctrl+C stops it and signs out.
+  **Warning:** the app otherwise never retries reservations automatically. This unattended automation is on
+  you: check the Events API terms and rate limits, and watch the console. It is off by default.
 
 Open the app at `localhost`, not `127.0.0.1`. The sign-in redirect is registered for the exact URL the server uses.
 
@@ -117,7 +135,7 @@ schedule and shows up in the official re:Invent app. The project page at
 python3 -m unittest
 ```
 
-Runs `test_local_auth.py` (local-server cookie auth, `/logout` and the Builder ID logout URL) and `test_proxy_path.py` (proxy path allow-list). Both
+Runs `test_local_auth.py` (local-server cookie auth, `/logout` and the Builder ID logout URL) and `test_proxy_path.py` (proxy path allow-list). `test_auto_reserve.py` (auto-reserve watcher: jitter, filtering, batching, error logging). All
 are offline and never contact AWS.
 
 ## Security notes
